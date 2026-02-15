@@ -24,6 +24,12 @@ _poll_interval: float = 1.0
 STATIC_DIR = Path(__file__).parent
 
 
+def set_controller(ctrl: Optional[WalkingPadController]) -> None:
+    """Set the global controller (used by GUI mode)."""
+    global controller
+    controller = ctrl
+
+
 # --- HTML routes ---
 
 
@@ -142,19 +148,35 @@ async def _reconnect_loop(mac: str) -> None:
 
 async def _polling_loop() -> None:
     """Poll WalkingPad status and broadcast to WebSocket clients."""
-    # Wait for initial connection before starting to poll
-    while not (controller and controller.connected):
-        await asyncio.sleep(1)
-
     while True:
         if controller and controller.connected:
             try:
                 await controller.request_status()
-                await asyncio.sleep(0.2)  # Wait for notification response
+            except Exception as e:
+                logger.warning("Status request error: %s", e)
+            # Always broadcast current stats (even if request failed,
+            # we may have data from BLE notifications)
+            await asyncio.sleep(0.3)
+            try:
                 await broadcast_stats()
             except Exception as e:
-                logger.warning("Polling error: %s", e)
+                logger.warning("Broadcast error: %s", e)
         await asyncio.sleep(_poll_interval)
+
+
+async def start_server(host: str = "0.0.0.0", port: int = 8777,
+                       poll_interval: float = 1.0) -> None:
+    """Start the FastAPI server and polling loop (used by GUI mode)."""
+    import uvicorn
+
+    global _poll_interval
+    _poll_interval = poll_interval
+
+    asyncio.create_task(_polling_loop())
+
+    config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+    server = uvicorn.Server(config)
+    await server.serve()
 
 
 # --- CLI & main ---
@@ -192,11 +214,9 @@ def main() -> None:
     print()
 
     async def _run() -> None:
-        # Start background tasks
         asyncio.create_task(_reconnect_loop(args.mac))
         asyncio.create_task(_polling_loop())
 
-        # Run uvicorn
         config = uvicorn.Config(app, host=args.host, port=args.port, log_level="info")
         server = uvicorn.Server(config)
         await server.serve()

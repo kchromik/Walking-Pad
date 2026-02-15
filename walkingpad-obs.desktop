@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=WalkingPad Control
+Comment=WalkingPad BLE Controller + OBS Overlay
+Exec=/home/kevin/Development/walking-pad/start.sh
+Icon=preferences-desktop-accessibility
+Terminal=false
+Type=Application
+Categories=Utility;
+Keywords=walkingpad;treadmill;obs;overlay;
