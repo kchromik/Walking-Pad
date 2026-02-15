@@ -36,10 +36,7 @@ MODE_NAMES = {0: "Standby", 1: "Manual", 2: "Auto"}
 
 
 def _build_packet(cmd: int, params: Optional[list[int]] = None) -> bytes:
-    """Build a command packet in ph4-walkingpad format: [A2][CMD][PARAM][CHECKSUM].
-
-    No F7/FD framing — the device disconnects if framing bytes are sent.
-    """
+    """Build a command packet: [F7][A2][CMD][PARAM...][CHECKSUM][FD]."""
     body = [HEADER_BYTE, cmd]
     if params:
         body.extend(params)
@@ -47,7 +44,7 @@ def _build_packet(cmd: int, params: Optional[list[int]] = None) -> bytes:
         body.append(0x00)  # zero-pad when no params
     checksum = sum(body) & 0xFF
     body.append(checksum)
-    return bytes(body)
+    return bytes([START_BYTE] + body + [END_BYTE])
 
 
 def _parse_uint16_be(data, offset: int) -> int:
@@ -140,13 +137,20 @@ class WalkingPadController:
     async def connect(self) -> None:
         """Connect to the WalkingPad via BLE with retry logic."""
         self._ready = False
-
-        subprocess.run(["bluetoothctl", "remove", self.mac], capture_output=True, timeout=5)
-        await asyncio.sleep(1)
+        self._loop = asyncio.get_running_loop()
 
         last_error = None
         for attempt in range(1, 4):
             try:
+                # Attempt 1: try with existing BlueZ state (preserves pairing)
+                # Attempt 2+: clear BlueZ cache and start fresh
+                if attempt > 1:
+                    subprocess.run(
+                        ["bluetoothctl", "remove", self.mac],
+                        capture_output=True, timeout=5,
+                    )
+                    await asyncio.sleep(1)
+
                 logger.info("Scanning for WalkingPad %s (attempt %d/3)...", self.mac, attempt)
                 device = await BleakScanner.find_device_by_address(self.mac, timeout=15.0)
                 if device is None:
@@ -159,28 +163,14 @@ class WalkingPadController:
                     ["bluetoothctl", "trust", self.mac], capture_output=True, timeout=5
                 )
 
-                self._loop = asyncio.get_running_loop()
                 self._client = BleakClient(device, disconnected_callback=self._on_disconnect)
                 await self._client.connect(timeout=15.0)
 
-                # Ensure GATT service discovery is complete (required on Python 3.14 / BlueZ)
-                svcs = self._client.services
-                if not svcs or not svcs.characteristics:
-                    await asyncio.sleep(1)
-                    svcs = self._client.services
-
-                # Subscribe to notifications (bonus — may not fire on all devices)
+                # Subscribe to notifications for receiving status responses
                 try:
                     await self._client.start_notify(READ_UUID, self._on_notify)
                 except Exception:
-                    pass  # Not critical — we poll via direct reads
-
-                # Verify we can actually communicate with the device
-                try:
-                    await self._client.read_gatt_char(READ_UUID)
-                except Exception:
-                    await asyncio.sleep(0.5)
-                    await self._client.read_gatt_char(READ_UUID)
+                    pass
 
                 self._ready = True
                 self.stats.connected = True
@@ -268,22 +258,19 @@ class WalkingPadController:
         await self._client.write_gatt_char(WRITE_UUID, packet, response=False)
 
     async def request_status(self) -> None:
-        """Request status: write command to fe02, then read response from fe01."""
+        """Request status: write command to fe02, wait for notification response."""
         await self._write(_build_packet(CMD_STATUS))
-        await asyncio.sleep(0.15)
-        # Read response directly from fe01 (notifications may not work)
-        try:
-            data = await self._client.read_gatt_char(READ_UUID)
-            if data:
-                self._parse_response(bytes(data))
-        except Exception:
-            pass
+        # Notification callback (_on_notify) handles parsing when response arrives
+        await asyncio.sleep(0.5)
 
-    async def start(self) -> None:
+    async def start(self, speed_kmh: float = 2.0) -> None:
         logger.info("Starting belt")
         await self._write(_build_packet(CMD_MODE, [1]))
         await asyncio.sleep(0.3)
         await self._write(_build_packet(CMD_BELT, [BELT_START]))
+        await asyncio.sleep(0.5)
+        speed_val = max(5, min(60, int(speed_kmh * 10)))
+        await self._write(_build_packet(CMD_SPEED, [speed_val]))
 
     async def stop(self) -> None:
         logger.info("Stopping belt")
