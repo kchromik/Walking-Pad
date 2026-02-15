@@ -133,13 +133,14 @@ class WalkingPadStats:
 class WalkingPadController:
     """BLE controller for the WalkingPad A1 Pro."""
 
-    def __init__(self, mac: str, on_status: Optional[Callable[[WalkingPadStats], None]] = None):
+    def __init__(self, mac: str, on_status: Optional[Callable] = None):
         self.mac = mac
-        self.on_status = on_status
+        self.on_status = on_status  # Can be sync or async callable
         self.stats = WalkingPadStats()
         self._client: Optional[BleakClient] = None
         self._buffer = bytearray()
         self._ready = False  # True only after connect + start_notify
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     @property
     def connected(self) -> bool:
@@ -177,6 +178,7 @@ class WalkingPadController:
                     ["bluetoothctl", "trust", self.mac], capture_output=True, timeout=5
                 )
 
+                self._loop = asyncio.get_running_loop()
                 self._client = BleakClient(device, disconnected_callback=self._on_disconnect)
                 await self._client.connect(timeout=15.0)
                 logger.info("BLE connected, subscribing to notifications...")
@@ -217,8 +219,9 @@ class WalkingPadController:
         self._ready = False
         self.stats.connected = False
 
-    def _on_notify(self, sender: int, data: bytearray) -> None:
+    def _on_notify(self, sender, data: bytearray) -> None:
         """Handle incoming BLE notification fragments."""
+        logger.debug("BLE notify: %s", data.hex())
         self._buffer.extend(data)
         self._process_buffer()
 
@@ -255,12 +258,14 @@ class WalkingPadController:
 
     def _parse_packet(self, packet: bytes) -> None:
         """Parse a complete status packet."""
+        logger.debug("Parsing packet (%d bytes): %s", len(packet), packet.hex())
+
         if len(packet) < 18:
             logger.debug("Packet too short (%d bytes), ignoring", len(packet))
             return
 
         if packet[2] != 0xA2:
-            # Not a status response
+            logger.debug("Not a status packet (cmd=0x%02x), ignoring", packet[2])
             return
 
         self.stats.state = packet[3]
@@ -271,17 +276,22 @@ class WalkingPadController:
         self.stats.steps = _parse_uint24_be(packet, 13)
         self.stats.connected = True
 
-        logger.debug(
-            "Status: %s speed=%.1f dist=%.2fkm steps=%d time=%s",
+        logger.info(
+            "Status: %s speed=%.1f dist=%.2fkm steps=%d time=%s cal=%d",
             self.stats.state_name,
             self.stats.speed_kmh,
             self.stats.distance_km,
             self.stats.steps,
             self.stats.time_formatted,
+            self.stats.calories,
         )
 
-        if self.on_status:
-            self.on_status(self.stats)
+        if self.on_status and self._loop:
+            # Schedule async callback from sync notification handler
+            if asyncio.iscoroutinefunction(self.on_status):
+                self._loop.create_task(self.on_status(self.stats))
+            else:
+                self.on_status(self.stats)
 
     async def _write(self, packet: bytes) -> None:
         """Write a command packet to the WalkingPad."""

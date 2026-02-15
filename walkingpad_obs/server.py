@@ -119,13 +119,18 @@ async def websocket_endpoint(ws: WebSocket):
 # --- Background tasks ---
 
 
+async def _on_status_update(stats) -> None:
+    """Called by WalkingPadController whenever new status data arrives via BLE."""
+    await broadcast_stats()
+
+
 async def _reconnect_loop(mac: str) -> None:
     """Connect to WalkingPad and auto-reconnect on connection loss."""
     global controller
     while True:
         try:
             if controller is None:
-                controller = WalkingPadController(mac, on_status=lambda s: None)
+                controller = WalkingPadController(mac, on_status=_on_status_update)
             if not controller.connected:
                 logger.info("Connecting to WalkingPad...")
                 await controller.connect()
