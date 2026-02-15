@@ -120,7 +120,7 @@ async def websocket_endpoint(ws: WebSocket):
 
 
 async def _reconnect_loop(mac: str) -> None:
-    """Auto-reconnect to WalkingPad on connection loss."""
+    """Connect to WalkingPad and auto-reconnect on connection loss."""
     global controller
     while True:
         try:
@@ -131,27 +131,25 @@ async def _reconnect_loop(mac: str) -> None:
                 await controller.connect()
                 logger.info("Connected successfully!")
         except Exception as e:
-            logger.warning("Connection failed: %s — retrying in 5s", e)
-        await asyncio.sleep(5)
+            logger.warning("Connection failed: %s — retrying in 10s", e)
+        await asyncio.sleep(10)
 
 
 async def _polling_loop() -> None:
     """Poll WalkingPad status and broadcast to WebSocket clients."""
+    # Wait for initial connection before starting to poll
+    while not (controller and controller.connected):
+        await asyncio.sleep(1)
+
     while True:
         if controller and controller.connected:
             try:
                 await controller.request_status()
-                await asyncio.sleep(0.1)  # Brief wait for response
+                await asyncio.sleep(0.2)  # Wait for notification response
                 await broadcast_stats()
             except Exception as e:
                 logger.warning("Polling error: %s", e)
         await asyncio.sleep(_poll_interval)
-
-
-@app.on_event("startup")
-async def startup_event():
-    # Background tasks are started by main() before uvicorn
-    pass
 
 
 # --- CLI & main ---

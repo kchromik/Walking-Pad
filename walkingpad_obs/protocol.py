@@ -2,17 +2,20 @@
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+import subprocess
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 from bleak import BleakClient, BleakScanner
 
 logger = logging.getLogger(__name__)
 
-# GATT UUIDs
+# GATT UUIDs — verified against ph4-walkingpad reference implementation:
+#   fe01 = Notify (receive status packets)
+#   fe02 = Write  (send commands)
 SERVICE_UUID = "0000fe00-0000-1000-8000-00805f9b34fb"
-WRITE_UUID = "0000fe01-0000-1000-8000-00805f9b34fb"
-NOTIFY_UUID = "0000fe02-0000-1000-8000-00805f9b34fb"
+NOTIFY_UUID = "0000fe01-0000-1000-8000-00805f9b34fb"
+WRITE_UUID = "0000fe02-0000-1000-8000-00805f9b34fb"
 
 # Packet framing
 START_BYTE = 0xF7
@@ -136,32 +139,70 @@ class WalkingPadController:
         self.stats = WalkingPadStats()
         self._client: Optional[BleakClient] = None
         self._buffer = bytearray()
+        self._ready = False  # True only after connect + start_notify
 
     @property
     def connected(self) -> bool:
-        return self._client is not None and self._client.is_connected
+        return self._ready and self._client is not None and self._client.is_connected
 
     async def connect(self) -> None:
-        """Connect to the WalkingPad via BLE.
+        """Connect to the WalkingPad via BLE with retry logic.
 
-        Scans first to discover the device, then connects using the BLEDevice
-        object. This lets BlueZ auto-detect the address type (public/random).
+        1. Removes stale BlueZ device cache
+        2. Trusts the device (helps with random addresses)
+        3. Scans fresh to discover the device
+        4. Connects using BLEDevice object (auto-detects address type)
+        5. Retries up to 3 times on failure
         """
-        logger.info("Scanning for WalkingPad %s ...", self.mac)
-        device = await BleakScanner.find_device_by_address(self.mac, timeout=10.0)
-        if device is None:
-            raise ConnectionError(
-                f"WalkingPad {self.mac} not found. Is it powered on and not connected to another app?"
-            )
-        logger.info("Found device: %s (%s)", device.name, device.address)
-        self._client = BleakClient(device, disconnected_callback=self._on_disconnect)
-        await self._client.connect()
-        await self._client.start_notify(NOTIFY_UUID, self._on_notify)
-        self.stats.connected = True
-        logger.info("Connected to WalkingPad %s", self.mac)
+        self._ready = False
+
+        # Remove stale BlueZ device cache
+        logger.debug("Clearing BlueZ cache for %s", self.mac)
+        subprocess.run(["bluetoothctl", "remove", self.mac], capture_output=True, timeout=5)
+        await asyncio.sleep(1)
+
+        last_error = None
+        for attempt in range(1, 4):
+            try:
+                logger.info("Scanning for WalkingPad %s (attempt %d/3)...", self.mac, attempt)
+                device = await BleakScanner.find_device_by_address(self.mac, timeout=15.0)
+                if device is None:
+                    raise ConnectionError(
+                        f"WalkingPad {self.mac} not found. Is it on and app disconnected?"
+                    )
+                logger.info("Found: %s (%s)", device.name, device.address)
+
+                # Trust the device (helps BlueZ with random BLE addresses)
+                subprocess.run(
+                    ["bluetoothctl", "trust", self.mac], capture_output=True, timeout=5
+                )
+
+                self._client = BleakClient(device, disconnected_callback=self._on_disconnect)
+                await self._client.connect(timeout=15.0)
+                logger.info("BLE connected, subscribing to notifications...")
+                await self._client.start_notify(NOTIFY_UUID, self._on_notify)
+                self._ready = True
+                self.stats.connected = True
+                logger.info("Connected to WalkingPad %s", self.mac)
+                return
+            except Exception as e:
+                last_error = e
+                logger.warning("Attempt %d failed: %s", attempt, e)
+                # Clean up partial connection
+                if self._client:
+                    try:
+                        await self._client.disconnect()
+                    except Exception:
+                        pass
+                    self._client = None
+                if attempt < 3:
+                    await asyncio.sleep(2)
+
+        raise ConnectionError(f"Failed to connect after 3 attempts: {last_error}")
 
     async def disconnect(self) -> None:
         """Disconnect from the WalkingPad."""
+        self._ready = False
         if self._client and self._client.is_connected:
             try:
                 await self._client.stop_notify(NOTIFY_UUID)
@@ -173,6 +214,7 @@ class WalkingPadController:
 
     def _on_disconnect(self, client: BleakClient) -> None:
         logger.warning("WalkingPad disconnected")
+        self._ready = False
         self.stats.connected = False
 
     def _on_notify(self, sender: int, data: bytearray) -> None:
@@ -264,7 +306,7 @@ class WalkingPadController:
         await self._write(_build_packet(CMD_BELT, [BELT_STOP]))
 
     async def set_speed(self, kmh: float) -> None:
-        """Set belt speed in km/h (0.5–6.0)."""
+        """Set belt speed in km/h (0.5-6.0)."""
         speed_val = max(5, min(60, int(kmh * 10)))
         logger.info("Setting speed to %.1f km/h (raw=%d)", kmh, speed_val)
         await self._write(_build_packet(CMD_SPEED, [speed_val]))
