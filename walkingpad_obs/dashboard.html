@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WalkingPad Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #0c0c10;
+  color: #e8e8ec;
+  font-family: 'Outfit', sans-serif;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 40px 16px;
+}
+
+.container {
+  width: 100%;
+  max-width: 480px;
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
+.header-icon {
+  width: 44px;
+  height: 44px;
+  background: rgba(34, 214, 138, 0.15);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+}
+
+.header-text h1 {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 600;
+  font-size: 20px;
+  color: #fff;
+}
+
+.conn-badge {
+  font-size: 11px;
+  font-weight: 400;
+  padding: 3px 10px;
+  border-radius: 20px;
+  margin-top: 2px;
+  display: inline-block;
+}
+
+.conn-badge.ok {
+  background: rgba(34, 214, 138, 0.15);
+  color: #22d68a;
+}
+
+.conn-badge.err {
+  background: rgba(255, 68, 68, 0.15);
+  color: #f44;
+}
+
+/* Cards */
+.card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  padding: 18px;
+}
+
+/* Stats grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.stat-card.full {
+  grid-column: 1 / -1;
+}
+
+.stat-card .label {
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 6px;
+}
+
+.stat-card .value {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-card.time  .value { color: #22d68a; }
+.stat-card.speed .value { color: #5be0f8; }
+.stat-card.steps .value { color: #c084fc; }
+.stat-card.cal   .value { color: #f8945b; }
+.stat-card.dist  .value { color: #e8e8ec; }
+
+/* Speed section */
+.speed-section {
+  margin-bottom: 20px;
+}
+
+.speed-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.speed-header .label {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.speed-header .current {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 16px;
+  color: #5be0f8;
+}
+
+/* Range slider */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+  margin-bottom: 14px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #5be0f8;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(91, 224, 248, 0.5);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #5be0f8;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 0 10px rgba(91, 224, 248, 0.5);
+}
+
+/* Preset buttons */
+.presets {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+
+.preset-btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.preset-btn:hover {
+  background: rgba(91, 224, 248, 0.1);
+  border-color: rgba(91, 224, 248, 0.3);
+  color: #5be0f8;
+}
+
+.preset-btn.active {
+  background: rgba(91, 224, 248, 0.15);
+  border-color: #5be0f8;
+  color: #5be0f8;
+}
+
+/* Action buttons */
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 20px 0;
+}
+
+.action-btn {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 600;
+  font-size: 15px;
+  padding: 14px;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.action-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.btn-start {
+  background: rgba(34, 214, 138, 0.15);
+  color: #22d68a;
+  border: 1px solid rgba(34, 214, 138, 0.3);
+}
+
+.btn-start:hover:not(:disabled) {
+  background: rgba(34, 214, 138, 0.25);
+}
+
+.btn-stop {
+  background: rgba(255, 68, 68, 0.15);
+  color: #f44;
+  border: 1px solid rgba(255, 68, 68, 0.3);
+}
+
+.btn-stop:hover:not(:disabled) {
+  background: rgba(255, 68, 68, 0.25);
+}
+
+/* Log */
+.log-section {
+  margin-top: 20px;
+}
+
+.log-section .label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: rgba(255, 255, 255, 0.3);
+  margin-bottom: 8px;
+}
+
+.log {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 10px 12px;
+  max-height: 120px;
+  overflow-y: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.log-entry .ts {
+  color: rgba(255, 255, 255, 0.2);
+  margin-right: 8px;
+}
+
+.log-entry.ok  .msg { color: #22d68a; }
+.log-entry.err .msg { color: #f44; }
+.log-entry     .msg { color: rgba(255, 255, 255, 0.5); }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <!-- Header -->
+  <div class="header">
+    <div class="header-icon">&#128694;</div>
+    <div class="header-text">
+      <h1>WalkingPad Control</h1>
+      <span class="conn-badge err" id="connBadge">Pad nicht verbunden</span>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-grid">
+    <div class="stat-card time">
+      <div class="label">Zeit</div>
+      <div class="value" id="sTime">00:00</div>
+    </div>
+    <div class="stat-card speed">
+      <div class="label">Geschwindigkeit</div>
+      <div class="value" id="sSpeed">0.0 km/h</div>
+    </div>
+    <div class="stat-card steps">
+      <div class="label">Schritte</div>
+      <div class="value" id="sSteps">0</div>
+    </div>
+    <div class="stat-card cal">
+      <div class="label">Kalorien</div>
+      <div class="value" id="sCal">0 kcal</div>
+    </div>
+    <div class="stat-card dist full">
+      <div class="label">Distanz</div>
+      <div class="value" id="sDist">0.00 km</div>
+    </div>
+  </div>
+
+  <!-- Speed control -->
+  <div class="card speed-section">
+    <div class="speed-header">
+      <span class="label">Geschwindigkeit einstellen</span>
+      <span class="current" id="sliderVal">0.0 km/h</span>
+    </div>
+    <input type="range" id="speedSlider" min="5" max="60" step="1" value="30">
+    <div class="presets">
+      <button class="preset-btn" data-speed="10">1.0</button>
+      <button class="preset-btn" data-speed="20">2.0</button>
+      <button class="preset-btn" data-speed="30">3.0</button>
+      <button class="preset-btn" data-speed="40">4.0</button>
+      <button class="preset-btn" data-speed="50">5.0</button>
+      <button class="preset-btn" data-speed="60">6.0</button>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="actions">
+    <button class="action-btn btn-start" id="btnStart" disabled>&#9654; Start</button>
+    <button class="action-btn btn-stop" id="btnStop" disabled>&#9632; Stop</button>
+  </div>
+
+  <!-- Log -->
+  <div class="log-section">
+    <div class="label">Log</div>
+    <div class="log" id="logArea"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const $ = id => document.getElementById(id);
+  const connBadge  = $('connBadge');
+  const sTime      = $('sTime');
+  const sSpeed     = $('sSpeed');
+  const sSteps     = $('sSteps');
+  const sCal       = $('sCal');
+  const sDist      = $('sDist');
+  const slider     = $('speedSlider');
+  const sliderVal  = $('sliderVal');
+  const btnStart   = $('btnStart');
+  const btnStop    = $('btnStop');
+  const logArea    = $('logArea');
+  const presetBtns = document.querySelectorAll('.preset-btn');
+
+  let connected = false;
+  let ws = null;
+  let speedTimer = null;
+
+  function formatSteps(n) {
+    return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  function ts() {
+    const d = new Date();
+    return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function addLog(msg, type) {
+    const el = document.createElement('div');
+    el.className = 'log-entry ' + (type || '');
+    el.innerHTML = '<span class="ts">' + ts() + '</span><span class="msg">' + msg + '</span>';
+    logArea.appendChild(el);
+    // Max 50 entries
+    while (logArea.children.length > 50) logArea.removeChild(logArea.firstChild);
+    logArea.scrollTop = logArea.scrollHeight;
+  }
+
+  function setConnected(state, label) {
+    connected = state;
+    connBadge.textContent = label;
+    connBadge.className = 'conn-badge ' + (state ? 'ok' : 'err');
+    btnStart.disabled = !state;
+    btnStop.disabled  = !state;
+  }
+
+  function update(data) {
+    if (data.connected) {
+      setConnected(true, data.is_running ? 'Läuft' : 'Verbunden');
+    } else {
+      setConnected(false, 'Pad nicht verbunden');
+    }
+
+    sTime.textContent  = data.time_formatted || '00:00';
+    sSpeed.textContent = (data.speed_kmh || 0).toFixed(1) + ' km/h';
+    sSteps.textContent = formatSteps(data.steps || 0);
+    sCal.textContent   = (data.calories || 0) + ' kcal';
+    sDist.textContent  = (data.distance_km || 0).toFixed(2) + ' km';
+
+    // Update preset highlight
+    const rawSpeed = Math.round((data.speed_kmh || 0) * 10);
+    presetBtns.forEach(function(btn) {
+      btn.classList.toggle('active', parseInt(btn.dataset.speed) === rawSpeed);
+    });
+  }
+
+  // Speed slider
+  slider.addEventListener('input', function() {
+    const kmh = (slider.value / 10).toFixed(1);
+    sliderVal.textContent = kmh + ' km/h';
+
+    // Highlight matching preset
+    presetBtns.forEach(function(btn) {
+      btn.classList.toggle('active', parseInt(btn.dataset.speed) === parseInt(slider.value));
+    });
+
+    // Debounce API call
+    clearTimeout(speedTimer);
+    speedTimer = setTimeout(function() {
+      apiCall('/api/speed/' + kmh, 'Geschwindigkeit: ' + kmh + ' km/h');
+    }, 300);
+  });
+
+  // Preset buttons
+  presetBtns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      const raw = parseInt(btn.dataset.speed);
+      slider.value = raw;
+      const kmh = (raw / 10).toFixed(1);
+      sliderVal.textContent = kmh + ' km/h';
+      presetBtns.forEach(function(b) { b.classList.toggle('active', b === btn); });
+      apiCall('/api/speed/' + kmh, 'Geschwindigkeit: ' + kmh + ' km/h');
+    });
+  });
+
+  // Action buttons
+  btnStart.addEventListener('click', function() {
+    apiCall('/api/start', 'Belt gestartet');
+  });
+
+  btnStop.addEventListener('click', function() {
+    apiCall('/api/stop', 'Belt gestoppt');
+  });
+
+  function apiCall(url, successMsg) {
+    fetch(url, { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'ok') {
+          addLog(successMsg, 'ok');
+        } else {
+          addLog('Fehler: ' + (data.message || 'Unbekannt'), 'err');
+        }
+      })
+      .catch(function(e) {
+        addLog('Fehler: ' + e.message, 'err');
+      });
+  }
+
+  // WebSocket
+  function connectWS() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/ws');
+
+    ws.onopen = function() {
+      addLog('Server verbunden', 'ok');
+    };
+
+    ws.onmessage = function(e) {
+      if (e.data === 'pong') return;
+      try { update(JSON.parse(e.data)); } catch(err) {}
+    };
+
+    ws.onclose = function() {
+      setConnected(false, 'Server getrennt');
+      addLog('Verbindung verloren', 'err');
+      setTimeout(connectWS, 2000);
+    };
+
+    ws.onerror = function() {
+      ws.close();
+    };
+  }
+
+  // Keep-alive ping
+  setInterval(function() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send('ping');
+    }
+  }, 30000);
+
+  connectWS();
+  addLog('Dashboard gestartet', 'ok');
+})();
+</script>
+</body>
+</html>

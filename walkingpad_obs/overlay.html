@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=800">
+<title>WalkingPad OBS Overlay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: transparent;
+  font-family: 'Outfit', sans-serif;
+  width: 800px;
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.overlay {
+  background: rgba(12, 12, 16, 0.85);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  padding: 20px 28px;
+  gap: 0;
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  animation: slideIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  opacity: 0;
+}
+
+@keyframes slideIn {
+  from { transform: translateY(20px) scale(0.95); opacity: 0; }
+  to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+/* Status dot */
+.status-dot {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22d68a;
+  box-shadow: 0 0 6px #22d68a, 0 0 12px rgba(34, 214, 138, 0.4);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.status-dot.disconnected {
+  background: #f44;
+  box-shadow: 0 0 6px #f44;
+  animation: none;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+
+/* Stat cards */
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 22px;
+  position: relative;
+  min-width: 110px;
+}
+
+.stat + .stat {
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.stat-icon {
+  font-size: 16px;
+  margin-bottom: 2px;
+}
+
+.stat-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  transition: color 0.3s;
+}
+
+.stat-label {
+  font-family: 'Outfit', sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 4px;
+}
+
+/* Colors */
+.stat.time .stat-value    { color: #22d68a; }
+.stat.dist .stat-value    { color: #e8e8ec; }
+.stat.steps .stat-value   { color: #c084fc; }
+.stat.speed .stat-value   { color: #5be0f8; }
+.stat.cal .stat-value     { color: #f8945b; }
+
+/* Speed fill bar */
+.stat.speed {
+  overflow: hidden;
+}
+
+.speed-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 100%;
+  background: linear-gradient(to top, rgba(91, 224, 248, 0.08), transparent);
+  transform-origin: bottom;
+  transform: scaleY(0);
+  transition: transform 0.5s ease;
+  pointer-events: none;
+}
+
+/* Active bar under speed */
+.active-bar {
+  position: absolute;
+  bottom: 0;
+  left: 15%;
+  right: 15%;
+  height: 2px;
+  background: #5be0f8;
+  box-shadow: 0 0 8px #5be0f8;
+  border-radius: 1px;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.active-bar.running {
+  opacity: 1;
+}
+
+/* Bump animation */
+@keyframes bump {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+.stat-value.bump {
+  animation: bump 0.25s ease;
+}
+
+/* Disconnected state */
+.overlay.disconnected {
+  opacity: 0.5;
+}
+
+.overlay.disconnected .stat-value {
+  color: #666 !important;
+}
+</style>
+</head>
+<body>
+
+<div class="overlay" id="overlay">
+  <div class="status-dot" id="statusDot"></div>
+
+  <div class="stat time">
+    <span class="stat-icon">&#9201;</span>
+    <span class="stat-value" id="vTime">00:00</span>
+    <span class="stat-label">Zeit</span>
+  </div>
+
+  <div class="stat dist">
+    <span class="stat-icon">&#128207;</span>
+    <span class="stat-value" id="vDist">0.00 km</span>
+    <span class="stat-label">Distanz</span>
+  </div>
+
+  <div class="stat steps">
+    <span class="stat-icon">&#128095;</span>
+    <span class="stat-value" id="vSteps">0</span>
+    <span class="stat-label">Schritte</span>
+  </div>
+
+  <div class="stat speed">
+    <div class="speed-fill" id="speedFill"></div>
+    <span class="stat-icon">&#9889;</span>
+    <span class="stat-value" id="vSpeed">0.0 km/h</span>
+    <span class="stat-label">Speed</span>
+    <div class="active-bar" id="activeBar"></div>
+  </div>
+
+  <div class="stat cal">
+    <span class="stat-icon">&#128293;</span>
+    <span class="stat-value" id="vCal">0 kcal</span>
+    <span class="stat-label">Kalorien</span>
+  </div>
+</div>
+
+<script>
+(function() {
+  const $ = id => document.getElementById(id);
+  const overlay   = $('overlay');
+  const dot       = $('statusDot');
+  const vTime     = $('vTime');
+  const vDist     = $('vDist');
+  const vSteps    = $('vSteps');
+  const vSpeed    = $('vSpeed');
+  const vCal      = $('vCal');
+  const speedFill = $('speedFill');
+  const activeBar = $('activeBar');
+
+  let prev = {};
+  let ws = null;
+  let reconnectDelay = 1000;
+
+  function formatSteps(n) {
+    return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  function bumpEl(el) {
+    el.classList.remove('bump');
+    void el.offsetWidth; // trigger reflow
+    el.classList.add('bump');
+  }
+
+  function update(data) {
+    // Connected state
+    if (data.connected) {
+      overlay.classList.remove('disconnected');
+      dot.classList.remove('disconnected');
+    } else {
+      overlay.classList.add('disconnected');
+      dot.classList.add('disconnected');
+    }
+
+    // Time
+    const timeStr = data.time_formatted || '00:00';
+    if (timeStr !== prev.time) { vTime.textContent = timeStr; bumpEl(vTime); }
+
+    // Distance
+    const distStr = (data.distance_km || 0).toFixed(2) + ' km';
+    if (distStr !== prev.dist) { vDist.textContent = distStr; bumpEl(vDist); }
+
+    // Steps
+    const stepsStr = formatSteps(data.steps || 0);
+    if (stepsStr !== prev.steps) { vSteps.textContent = stepsStr; bumpEl(vSteps); }
+
+    // Speed
+    const speedStr = (data.speed_kmh || 0).toFixed(1) + ' km/h';
+    if (speedStr !== prev.speed) { vSpeed.textContent = speedStr; bumpEl(vSpeed); }
+
+    // Calories
+    const calStr = (data.calories || 0) + ' kcal';
+    if (calStr !== prev.cal) { vCal.textContent = calStr; bumpEl(vCal); }
+
+    // Speed fill bar (max 6 km/h)
+    const fillPct = Math.min((data.speed_kmh || 0) / 6.0, 1.0);
+    speedFill.style.transform = 'scaleY(' + fillPct + ')';
+
+    // Active bar
+    if (data.is_running) {
+      activeBar.classList.add('running');
+    } else {
+      activeBar.classList.remove('running');
+    }
+
+    prev = { time: timeStr, dist: distStr, steps: stepsStr, speed: speedStr, cal: calStr };
+  }
+
+  function connectWS() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/ws');
+
+    ws.onopen = function() {
+      reconnectDelay = 1000;
+    };
+
+    ws.onmessage = function(e) {
+      if (e.data === 'pong') return;
+      try { update(JSON.parse(e.data)); } catch(err) {}
+    };
+
+    ws.onclose = function() {
+      overlay.classList.add('disconnected');
+      dot.classList.add('disconnected');
+      setTimeout(connectWS, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+    };
+
+    ws.onerror = function() {
+      ws.close();
+    };
+  }
+
+  // Keep-alive ping
+  setInterval(function() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send('ping');
+    }
+  }, 30000);
+
+  connectWS();
+})();
+</script>
+</body>
+</html>

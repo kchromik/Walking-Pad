@@ -1,0 +1,195 @@
+{
+  "project": "WalkingPad OBS Overlay",
+  "branchName": "ralph/walkingpad-obs-overlay",
+  "description": "Local web service that connects via BLE to a KingSmith WalkingPad A1 Pro, reads live data (steps, distance, time, speed), and displays it as an OBS Browser Source overlay. Includes a web dashboard for controlling the treadmill.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create requirements.txt with project dependencies",
+      "description": "As a developer, I need a requirements.txt so that all Python dependencies are declared and installable.",
+      "acceptanceCriteria": [
+        "requirements.txt exists in project root",
+        "Contains bleak>=0.21.0",
+        "Contains fastapi>=0.110.0",
+        "Contains uvicorn[standard]>=0.29.0",
+        "Contains websockets>=12.0",
+        "pip install -r requirements.txt succeeds"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Create __init__.py for walkingpad_obs package",
+      "description": "As a developer, I need the Python package structure initialized so that subsequent modules can be added.",
+      "acceptanceCriteria": [
+        "walkingpad_obs/ directory exists",
+        "walkingpad_obs/__init__.py exists",
+        "Python syntax check passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Implement BLE protocol module (protocol.py)",
+      "description": "As a developer, I need the BLE/GATT protocol implementation so that the server can communicate with the WalkingPad A1 Pro.",
+      "acceptanceCriteria": [
+        "walkingpad_obs/protocol.py exists",
+        "GATT Service UUID 0000fe00-..., Write UUID 0000fe01-..., Notify UUID 0000fe02-... defined as constants",
+        "Packet builder creates bytes with format [0xF7][0xA2][CMD][...PARAMS][CHECKSUM][0xFD]",
+        "Checksum calculated as (sum of bytes from 0xA2 to last param) & 0xFF",
+        "WalkingPadStats dataclass with fields: distance_km, time_seconds, time_formatted, steps, speed_kmh, state, state_name, mode, mode_name, calories, connected, is_running",
+        "Status parser correctly reads state (byte 3), speed (bytes 4-5 big-endian /10), mode (byte 6), time (bytes 7-9 big-endian uint24), distance (bytes 10-12 big-endian /100), steps (bytes 13-15 big-endian uint24)",
+        "WalkingPadController class with connect, disconnect, start, stop, set_speed, request_status methods",
+        "Packet buffer handles fragmented BLE notifications (checks 0xF7 start and 0xFD end bytes)",
+        "Calorie estimation: ~55 kcal per km with 10% bonus above 4.0 km/h",
+        "to_dict() method on WalkingPadStats returns JSON-serializable dict",
+        "Python syntax check passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Read WALKINGPAD-OBS-SPEC.md section 'BLE-Protokoll' for exact byte offsets and command formats. Reference implementations: github.com/DorianRudolph/QWalkingPad and github.com/ph4r05/ph4-walkingpad"
+    },
+    {
+      "id": "US-004",
+      "title": "Implement BLE scanner module (scan.py)",
+      "description": "As a user, I want to scan for nearby WalkingPad BLE devices so that I can find my device's MAC address.",
+      "acceptanceCriteria": [
+        "walkingpad_obs/scan.py exists",
+        "Runnable via python -m walkingpad_obs.scan",
+        "Scans for 10 seconds using bleak",
+        "Filters devices by name containing 'KS-' or 'WALKINGPAD' (case-insensitive)",
+        "Prints device name, MAC address, and RSSI for each match",
+        "Shows helpful message if no devices found: pad must be powered on and not connected to smartphone app",
+        "Python syntax check passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "BLE device name is typically 'KS-ST-A1P'"
+    },
+    {
+      "id": "US-005",
+      "title": "Implement FastAPI server with REST API and WebSocket (server.py)",
+      "description": "As a user, I want a web server that connects to my WalkingPad and exposes REST API endpoints and a WebSocket for live data.",
+      "acceptanceCriteria": [
+        "walkingpad_obs/server.py exists",
+        "CLI args: --mac (required), --host (default 0.0.0.0), --port (default 8777), --poll-interval (default 1.0), --verbose",
+        "GET / serves dashboard.html",
+        "GET /overlay serves overlay.html",
+        "GET /api/stats returns JSON with all WalkingPadStats fields",
+        "POST /api/start sends start command to WalkingPad and returns {status: 'ok'}",
+        "POST /api/stop sends stop command and returns {status: 'ok'}",
+        "POST /api/speed/{kmh} validates range 0.5-6.0 and sets speed, returns {status: 'ok', speed: float}",
+        "WebSocket /ws sends current status on connect, broadcasts on every status update, handles ping/pong keep-alive",
+        "Auto-reconnect to BLE device every 5 seconds on connection loss",
+        "Status polling every poll-interval seconds",
+        "Prints startup URLs to terminal (dashboard, overlay, API stats)",
+        "Python syntax check passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "HTML files are served from the same directory as server.py using pathlib. Use FastAPI HTMLResponse for HTML routes."
+    },
+    {
+      "id": "US-006",
+      "title": "Create entry point __main__.py",
+      "description": "As a developer, I need an entry point so that the server can be started via python -m walkingpad_obs.",
+      "acceptanceCriteria": [
+        "walkingpad_obs/__main__.py exists",
+        "Imports and calls server.main()",
+        "python -m walkingpad_obs --help shows CLI usage",
+        "Python syntax check passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Create OBS Browser Source overlay (overlay.html)",
+      "description": "As a streamer, I want an OBS overlay that shows live WalkingPad stats (time, distance, steps, speed, calories) with a polished design.",
+      "acceptanceCriteria": [
+        "walkingpad_obs/overlay.html exists",
+        "Self-contained HTML file with inline CSS and JS, no external frameworks",
+        "Transparent background for OBS Browser Source (800x200px)",
+        "Dark glassmorphism card with rgba(12,12,16,0.85) background and 16px border-radius",
+        "Horizontal layout: all 5 stats in one row with dividers between them",
+        "Stats displayed: Time (green #22d68a, MM:SS/H:MM:SS), Distance (white #e8e8ec, 0.00 km), Steps (purple #c084fc, with thousands separator), Speed (cyan #5be0f8, 0.0 km/h), Calories (orange #f8945b, 0 kcal)",
+        "Fonts: JetBrains Mono (Bold, 26px, tabular-nums) for values, Outfit (10px, uppercase) for labels, loaded via Google Fonts",
+        "Slide-in animation on load (translateY + scale with cubic-bezier)",
+        "Bump animation on value changes (scale to 1.08)",
+        "Pulsing status dot (6px, top-left): green+glow when connected, red when disconnected",
+        "Speed fill bar: background fills proportional to speed (max 6 km/h = 100%)",
+        "Active bar: glowing line under speed card when belt is running",
+        "Disconnected state: 50% opacity, all values gray",
+        "WebSocket connects to ws://{host}/ws with auto-reconnect (exponential backoff 1s to 10s) and 30s keep-alive ping",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Read WALKINGPAD-OBS-SPEC.md sections 'OBS Overlay' for exact design specs. All CSS and JS must be inline in the HTML file."
+    },
+    {
+      "id": "US-008",
+      "title": "Create web dashboard with controls (dashboard.html)",
+      "description": "As a user, I want a web dashboard to monitor WalkingPad stats and control the treadmill (start, stop, set speed) from my browser.",
+      "acceptanceCriteria": [
+        "walkingpad_obs/dashboard.html exists",
+        "Self-contained HTML file with inline CSS and JS, no external frameworks",
+        "Dark UI with background #0c0c10, centered card layout max 480px wide",
+        "German labels and text throughout",
+        "Header with walking icon in green badge, title 'WalkingPad Control', connection badge (green 'Verbunden'/'Laeuft' or red 'Pad nicht verbunden'/'Server getrennt')",
+        "Stats grid: 2-column layout - Zeit (green) | Geschwindigkeit (cyan), Schritte (purple) | Kalorien (orange), Distanz (full width, white). Same colors as overlay.",
+        "Speed slider section: label 'Geschwindigkeit einstellen', range 0.5-6.0 km/h in 0.1 steps (internally min=5 max=60 step=1), custom cyan thumb with glow",
+        "6 preset buttons below slider: 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 - active preset highlighted",
+        "Speed API call debounced at 300ms",
+        "Start button (green, calls POST /api/start) and Stop button (red, calls POST /api/stop) in 2-column layout",
+        "Buttons disabled when pad not connected",
+        "Scrollable log area at bottom (max 120px height, JetBrains Mono 11px, timestamped, color-coded: green for ok, red for errors, max 50 entries)",
+        "WebSocket connects to ws://{host}/ws with auto-reconnect (2s interval) and ping/pong",
+        "Fonts: JetBrains Mono + Outfit via Google Fonts",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Read WALKINGPAD-OBS-SPEC.md section 'Web Dashboard' for exact layout specifications. All CSS and JS must be inline."
+    },
+    {
+      "id": "US-009",
+      "title": "Create README.md with setup and usage documentation",
+      "description": "As a user, I want documentation so that I can set up and use the WalkingPad OBS overlay.",
+      "acceptanceCriteria": [
+        "README.md exists in project root",
+        "Contains project description",
+        "Contains setup instructions (install dependencies, find MAC address via scan, start server)",
+        "Contains OBS Browser Source setup instructions (URL, width 800, height 200)",
+        "Contains API endpoint documentation table",
+        "Contains all endpoint URLs from spec"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Final review and verification of all files",
+      "description": "As a developer, I want to verify that all files are consistent, all routes match between server and frontends, and the BLE protocol is correctly implemented.",
+      "acceptanceCriteria": [
+        "All files from project structure exist: requirements.txt, walkingpad_obs/__init__.py, __main__.py, protocol.py, server.py, scan.py, overlay.html, dashboard.html, README.md",
+        "All Python files pass syntax check (python -c 'import ast; ast.parse(open(f).read())')",
+        "Server routes match frontend WebSocket/API URLs",
+        "BLE protocol byte offsets match spec exactly",
+        "overlay.html WebSocket connects to correct /ws path",
+        "dashboard.html API calls match server routes (/api/start, /api/stop, /api/speed/{kmh})",
+        "requirements.txt contains all 4 dependencies",
+        "__main__.py imports and calls server.main()"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Read every file and cross-reference against WALKINGPAD-OBS-SPEC.md"
+    }
+  ]
+}
