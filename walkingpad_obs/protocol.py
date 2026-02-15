@@ -19,7 +19,8 @@ WRITE_UUID = "0000fe02-0000-1000-8000-00805f9b34fb"
 
 # Packet bytes
 HEADER_BYTE = 0xA2
-START_BYTE = 0xF7
+CMD_START_BYTE = 0xF7   # commands from host → device
+RESP_START_BYTE = 0xF8  # responses from device → host
 END_BYTE = 0xFD
 
 # Commands
@@ -44,11 +45,7 @@ def _build_packet(cmd: int, params: Optional[list[int]] = None) -> bytes:
         body.append(0x00)  # zero-pad when no params
     checksum = sum(body) & 0xFF
     body.append(checksum)
-    return bytes([START_BYTE] + body + [END_BYTE])
-
-
-def _parse_uint16_be(data, offset: int) -> int:
-    return (data[offset] << 8) | data[offset + 1]
+    return bytes([CMD_START_BYTE] + body + [END_BYTE])
 
 
 def _parse_uint24_be(data, offset: int) -> int:
@@ -210,36 +207,36 @@ class WalkingPadController:
         self._parse_response(bytes(data))
 
     def _parse_response(self, data: bytes) -> bool:
-        """Parse a status response. Handles both framed (F7...FD) and raw data.
+        """Parse a status response from the WalkingPad.
 
-        Returns True if stats were updated.
+        Response format (from device):
+          [0] 0xF8       — response start byte
+          [1] 0xA2       — response type (current status)
+          [2] state      — belt state (0=standby, 1=running, 5=idle)
+          [3] speed      — 1 byte, divide by 10 for km/h
+          [4] mode       — 0=auto, 1=manual, 2=standby
+          [5-7] time     — uint24 BE, seconds
+          [8-10] dist    — uint24 BE, divide by 100 for km
+          [11-13] steps  — uint24 BE
         """
-        if not data or len(data) < 4:
+        if not data or len(data) < 14:
             return False
 
-        # If framed (F7 ... FD), strip framing
-        if data[0] == START_BYTE and data[-1] == END_BYTE:
-            data = data[1:-1]  # strip F7 and FD
-
-        # Now data should be: [A2] [CMD=A2] [state] [speed_hi] [speed_lo] [mode] ...
-        # Or unframed: [A2] [A2] [state] ...
-        # Need at least: A2 + A2 + 13 data bytes + checksum = 16 bytes
-        if len(data) < 16:
-            return False
-
-        if data[0] != HEADER_BYTE:
-            return False
-
-        # data[1] is the response type — 0xA2 = current status
-        if data[1] != 0xA2:
+        # Response starts with 0xF8 0xA2
+        if data[0] == RESP_START_BYTE and data[1] == HEADER_BYTE:
+            pass  # correct format
+        # Also accept if read returns without F8 prefix (direct read path)
+        elif data[0] == HEADER_BYTE and data[1] == HEADER_BYTE:
+            pass  # A2 A2 format from direct read
+        else:
             return False
 
         self.stats.state = data[2]
-        self.stats.speed_raw = _parse_uint16_be(data, 3)
-        self.stats.mode = data[5]
-        self.stats.time_seconds = _parse_uint24_be(data, 6)
-        self.stats.distance_raw = _parse_uint24_be(data, 9)
-        self.stats.steps = _parse_uint24_be(data, 12)
+        self.stats.speed_raw = data[3]          # 1 byte, not 2!
+        self.stats.mode = data[4]
+        self.stats.time_seconds = _parse_uint24_be(data, 5)
+        self.stats.distance_raw = _parse_uint24_be(data, 8)
+        self.stats.steps = _parse_uint24_be(data, 11)
         self.stats.connected = True
 
         self._fire_callback()
@@ -258,10 +255,19 @@ class WalkingPadController:
         await self._client.write_gatt_char(WRITE_UUID, packet, response=False)
 
     async def request_status(self) -> None:
-        """Request status: write command to fe02, wait for notification response."""
+        """Request status: write framed command to fe02, then try read or notification."""
         await self._write(_build_packet(CMD_STATUS))
-        # Notification callback (_on_notify) handles parsing when response arrives
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.2)
+        # Try direct read — may work now that framed writes are accepted
+        try:
+            data = await self._client.read_gatt_char(READ_UUID)
+            if data:
+                self._parse_response(bytes(data))
+                return
+        except Exception:
+            pass
+        # Fallback: wait for notification callback
+        await asyncio.sleep(0.3)
 
     async def start(self, speed_kmh: float = 2.0) -> None:
         logger.info("Starting belt")
