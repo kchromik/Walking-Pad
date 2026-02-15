@@ -123,18 +123,15 @@ async def _reconnect_loop(mac: str) -> None:
     """Auto-reconnect to WalkingPad on connection loss."""
     global controller
     while True:
-        if controller and not controller.connected:
-            logger.info("Attempting reconnect...")
-            try:
+        try:
+            if controller is None:
+                controller = WalkingPadController(mac, on_status=lambda s: None)
+            if not controller.connected:
+                logger.info("Connecting to WalkingPad...")
                 await controller.connect()
-            except Exception as e:
-                logger.warning("Reconnect failed: %s", e)
-        elif controller is None:
-            controller = WalkingPadController(mac, on_status=lambda s: None)
-            try:
-                await controller.connect()
-            except Exception as e:
-                logger.warning("Initial connect failed: %s", e)
+                logger.info("Connected successfully!")
+        except Exception as e:
+            logger.warning("Connection failed: %s — retrying in 5s", e)
         await asyncio.sleep(5)
 
 

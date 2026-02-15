@@ -142,9 +142,19 @@ class WalkingPadController:
         return self._client is not None and self._client.is_connected
 
     async def connect(self) -> None:
-        """Connect to the WalkingPad via BLE."""
-        logger.info("Connecting to WalkingPad %s ...", self.mac)
-        self._client = BleakClient(self.mac, disconnected_callback=self._on_disconnect)
+        """Connect to the WalkingPad via BLE.
+
+        Scans first to discover the device, then connects using the BLEDevice
+        object. This lets BlueZ auto-detect the address type (public/random).
+        """
+        logger.info("Scanning for WalkingPad %s ...", self.mac)
+        device = await BleakScanner.find_device_by_address(self.mac, timeout=10.0)
+        if device is None:
+            raise ConnectionError(
+                f"WalkingPad {self.mac} not found. Is it powered on and not connected to another app?"
+            )
+        logger.info("Found device: %s (%s)", device.name, device.address)
+        self._client = BleakClient(device, disconnected_callback=self._on_disconnect)
         await self._client.connect()
         await self._client.start_notify(NOTIFY_UUID, self._on_notify)
         self.stats.connected = True
