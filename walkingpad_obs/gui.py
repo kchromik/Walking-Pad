@@ -173,6 +173,21 @@ class WalkingPadApp:
                                        font=("monospace", 8), bg=BG, fg=FG_DIM, anchor="w")
         self.overlay_label.pack(fill="x")
 
+        link_frame = tk.Frame(info, bg=BG)
+        link_frame.pack(fill="x", pady=(4, 0))
+        self.open_dash_btn = tk.Button(link_frame, text="Dashboard öffnen",
+                                        command=lambda: self._open_url("http://127.0.0.1:8777/"),
+                                        bg=BG_INPUT, fg=CYAN, activebackground=BORDER,
+                                        activeforeground=CYAN, bd=0, padx=10, pady=3,
+                                        font=("sans-serif", 9), state="disabled")
+        self.open_dash_btn.pack(side="left", padx=(0, 6))
+        self.open_overlay_btn = tk.Button(link_frame, text="OBS Overlay öffnen",
+                                           command=lambda: self._open_url("http://127.0.0.1:8777/overlay"),
+                                           bg=BG_INPUT, fg=CYAN, activebackground=BORDER,
+                                           activeforeground=CYAN, bd=0, padx=10, pady=3,
+                                           font=("sans-serif", 9), state="disabled")
+        self.open_overlay_btn.pack(side="left")
+
         # Log
         log_frame = tk.LabelFrame(self.root, text="Log", font=("sans-serif", 9),
                                    bg=BG_CARD, fg=FG_DIM, bd=1, relief="solid",
@@ -324,9 +339,15 @@ class WalkingPadApp:
             self.start_btn.configure(state="disabled")
             self.stop_btn.configure(state="disabled")
 
+    def _open_url(self, url):
+        import webbrowser
+        webbrowser.open(url)
+
     def _update_server_info(self):
         self.server_label.configure(text="Server: http://127.0.0.1:8777", fg=FG)
         self.overlay_label.configure(text="OBS:    http://127.0.0.1:8777/overlay", fg=FG)
+        self.open_dash_btn.configure(state="normal")
+        self.open_overlay_btn.configure(state="normal")
         self._log("Webserver gestartet auf Port 8777", "ok")
 
     # --- BLE status callback ---

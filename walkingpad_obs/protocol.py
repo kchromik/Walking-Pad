@@ -10,16 +10,16 @@ from bleak import BleakClient, BleakScanner
 
 logger = logging.getLogger(__name__)
 
-# GATT UUIDs — verified against ph4-walkingpad reference implementation:
-#   fe01 = Notify (receive status packets)
-#   fe02 = Write  (send commands)
+# GATT UUIDs (verified via GATT discovery):
+#   fe01 = [read, notify]  — read status responses here
+#   fe02 = [write-without-response] — send commands here
 SERVICE_UUID = "0000fe00-0000-1000-8000-00805f9b34fb"
-NOTIFY_UUID = "0000fe01-0000-1000-8000-00805f9b34fb"
+READ_UUID = "0000fe01-0000-1000-8000-00805f9b34fb"
 WRITE_UUID = "0000fe02-0000-1000-8000-00805f9b34fb"
 
-# Packet framing
-START_BYTE = 0xF7
+# Packet bytes
 HEADER_BYTE = 0xA2
+START_BYTE = 0xF7
 END_BYTE = 0xFD
 
 # Commands
@@ -28,41 +28,33 @@ CMD_SPEED = 0x01
 CMD_MODE = 0x02
 CMD_BELT = 0x04
 
-# Belt sub-commands
 BELT_START = 0x01
 BELT_STOP = 0x02
 
-# States
-STATE_NAMES = {
-    0: "Standby",
-    1: "Running",
-    2: "Starting",
-    5: "Idle",
-    6: "Paused",
-}
-
-# Modes
-MODE_NAMES = {
-    0: "Standby",
-    1: "Manual",
-    2: "Auto",
-}
+STATE_NAMES = {0: "Standby", 1: "Running", 2: "Starting", 5: "Idle", 6: "Paused"}
+MODE_NAMES = {0: "Standby", 1: "Manual", 2: "Auto"}
 
 
 def _build_packet(cmd: int, params: Optional[list[int]] = None) -> bytes:
-    """Build a WalkingPad command packet with checksum."""
+    """Build a command packet in ph4-walkingpad format: [A2][CMD][PARAM][CHECKSUM].
+
+    No F7/FD framing — the device disconnects if framing bytes are sent.
+    """
     body = [HEADER_BYTE, cmd]
     if params:
         body.extend(params)
+    else:
+        body.append(0x00)  # zero-pad when no params
     checksum = sum(body) & 0xFF
-    return bytes([START_BYTE] + body + [checksum, END_BYTE])
+    body.append(checksum)
+    return bytes(body)
 
 
-def _parse_uint16_be(data: bytes, offset: int) -> int:
+def _parse_uint16_be(data, offset: int) -> int:
     return (data[offset] << 8) | data[offset + 1]
 
 
-def _parse_uint24_be(data: bytes, offset: int) -> int:
+def _parse_uint24_be(data, offset: int) -> int:
     return (data[offset] << 16) | (data[offset + 1] << 8) | data[offset + 2]
 
 
@@ -135,11 +127,10 @@ class WalkingPadController:
 
     def __init__(self, mac: str, on_status: Optional[Callable] = None):
         self.mac = mac
-        self.on_status = on_status  # Can be sync or async callable
+        self.on_status = on_status
         self.stats = WalkingPadStats()
         self._client: Optional[BleakClient] = None
-        self._buffer = bytearray()
-        self._ready = False  # True only after connect + start_notify
+        self._ready = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     @property
@@ -147,18 +138,9 @@ class WalkingPadController:
         return self._ready and self._client is not None and self._client.is_connected
 
     async def connect(self) -> None:
-        """Connect to the WalkingPad via BLE with retry logic.
-
-        1. Removes stale BlueZ device cache
-        2. Trusts the device (helps with random addresses)
-        3. Scans fresh to discover the device
-        4. Connects using BLEDevice object (auto-detects address type)
-        5. Retries up to 3 times on failure
-        """
+        """Connect to the WalkingPad via BLE with retry logic."""
         self._ready = False
 
-        # Remove stale BlueZ device cache
-        logger.debug("Clearing BlueZ cache for %s", self.mac)
         subprocess.run(["bluetoothctl", "remove", self.mac], capture_output=True, timeout=5)
         await asyncio.sleep(1)
 
@@ -173,7 +155,6 @@ class WalkingPadController:
                     )
                 logger.info("Found: %s (%s)", device.name, device.address)
 
-                # Trust the device (helps BlueZ with random BLE addresses)
                 subprocess.run(
                     ["bluetoothctl", "trust", self.mac], capture_output=True, timeout=5
                 )
@@ -181,8 +162,13 @@ class WalkingPadController:
                 self._loop = asyncio.get_running_loop()
                 self._client = BleakClient(device, disconnected_callback=self._on_disconnect)
                 await self._client.connect(timeout=15.0)
-                logger.info("BLE connected, subscribing to notifications...")
-                await self._client.start_notify(NOTIFY_UUID, self._on_notify)
+
+                # Subscribe to notifications (bonus — may not fire on all devices)
+                try:
+                    await self._client.start_notify(READ_UUID, self._on_notify)
+                except Exception:
+                    pass  # Not critical — we poll via direct reads
+
                 self._ready = True
                 self.stats.connected = True
                 logger.info("Connected to WalkingPad %s", self.mac)
@@ -190,7 +176,6 @@ class WalkingPadController:
             except Exception as e:
                 last_error = e
                 logger.warning("Attempt %d failed: %s", attempt, e)
-                # Clean up partial connection
                 if self._client:
                     try:
                         await self._client.disconnect()
@@ -203,16 +188,14 @@ class WalkingPadController:
         raise ConnectionError(f"Failed to connect after 3 attempts: {last_error}")
 
     async def disconnect(self) -> None:
-        """Disconnect from the WalkingPad."""
         self._ready = False
         if self._client and self._client.is_connected:
             try:
-                await self._client.stop_notify(NOTIFY_UUID)
+                await self._client.stop_notify(READ_UUID)
             except Exception:
                 pass
             await self._client.disconnect()
         self.stats.connected = False
-        logger.info("Disconnected from WalkingPad")
 
     def _on_disconnect(self, client: BleakClient) -> None:
         logger.warning("WalkingPad disconnected")
@@ -220,110 +203,86 @@ class WalkingPadController:
         self.stats.connected = False
 
     def _on_notify(self, sender, data: bytearray) -> None:
-        """Handle incoming BLE notification fragments."""
-        logger.debug("BLE notify: %s", data.hex())
-        self._buffer.extend(data)
-        self._process_buffer()
+        """Handle BLE notification (bonus path)."""
+        self._parse_response(bytes(data))
 
-    def _process_buffer(self) -> None:
-        """Extract complete packets from the buffer."""
-        while True:
-            # Find start byte
-            start_idx = -1
-            for i, b in enumerate(self._buffer):
-                if b == START_BYTE:
-                    start_idx = i
-                    break
-            if start_idx < 0:
-                self._buffer.clear()
-                return
+    def _parse_response(self, data: bytes) -> bool:
+        """Parse a status response. Handles both framed (F7...FD) and raw data.
 
-            # Discard bytes before start
-            if start_idx > 0:
-                self._buffer = self._buffer[start_idx:]
+        Returns True if stats were updated.
+        """
+        if not data or len(data) < 4:
+            return False
 
-            # Find end byte
-            end_idx = -1
-            for i, b in enumerate(self._buffer):
-                if b == END_BYTE and i > 0:
-                    end_idx = i
-                    break
-            if end_idx < 0:
-                return  # Incomplete packet, wait for more data
+        # If framed (F7 ... FD), strip framing
+        if data[0] == START_BYTE and data[-1] == END_BYTE:
+            data = data[1:-1]  # strip F7 and FD
 
-            # Extract packet
-            packet = bytes(self._buffer[: end_idx + 1])
-            self._buffer = self._buffer[end_idx + 1 :]
-            self._parse_packet(packet)
+        # Now data should be: [A2] [CMD=A2] [state] [speed_hi] [speed_lo] [mode] ...
+        # Or unframed: [A2] [A2] [state] ...
+        # Need at least: A2 + A2 + 13 data bytes + checksum = 16 bytes
+        if len(data) < 16:
+            return False
 
-    def _parse_packet(self, packet: bytes) -> None:
-        """Parse a complete status packet."""
-        logger.debug("Parsing packet (%d bytes): %s", len(packet), packet.hex())
+        if data[0] != HEADER_BYTE:
+            return False
 
-        if len(packet) < 18:
-            logger.debug("Packet too short (%d bytes), ignoring", len(packet))
-            return
+        # data[1] is the response type — 0xA2 = current status
+        if data[1] != 0xA2:
+            return False
 
-        if packet[2] != 0xA2:
-            logger.debug("Not a status packet (cmd=0x%02x), ignoring", packet[2])
-            return
-
-        self.stats.state = packet[3]
-        self.stats.speed_raw = _parse_uint16_be(packet, 4)
-        self.stats.mode = packet[6]
-        self.stats.time_seconds = _parse_uint24_be(packet, 7)
-        self.stats.distance_raw = _parse_uint24_be(packet, 10)
-        self.stats.steps = _parse_uint24_be(packet, 13)
+        self.stats.state = data[2]
+        self.stats.speed_raw = _parse_uint16_be(data, 3)
+        self.stats.mode = data[5]
+        self.stats.time_seconds = _parse_uint24_be(data, 6)
+        self.stats.distance_raw = _parse_uint24_be(data, 9)
+        self.stats.steps = _parse_uint24_be(data, 12)
         self.stats.connected = True
 
-        logger.info(
-            "Status: %s speed=%.1f dist=%.2fkm steps=%d time=%s cal=%d",
-            self.stats.state_name,
-            self.stats.speed_kmh,
-            self.stats.distance_km,
-            self.stats.steps,
-            self.stats.time_formatted,
-            self.stats.calories,
-        )
+        self._fire_callback()
+        return True
 
+    def _fire_callback(self):
         if self.on_status and self._loop:
-            # Schedule async callback from sync notification handler
             if asyncio.iscoroutinefunction(self.on_status):
                 self._loop.create_task(self.on_status(self.stats))
             else:
                 self.on_status(self.stats)
 
     async def _write(self, packet: bytes) -> None:
-        """Write a command packet to the WalkingPad."""
         if not self.connected:
             raise ConnectionError("Not connected to WalkingPad")
         await self._client.write_gatt_char(WRITE_UUID, packet, response=False)
 
     async def request_status(self) -> None:
-        """Request current status from the WalkingPad."""
+        """Request status: write command to fe02, then read response from fe01."""
         await self._write(_build_packet(CMD_STATUS))
+        await asyncio.sleep(0.15)
+        # Read response directly from fe01 (notifications may not work)
+        try:
+            data = await self._client.read_gatt_char(READ_UUID)
+            if data:
+                self._parse_response(bytes(data))
+        except Exception:
+            pass
 
     async def start(self) -> None:
-        """Start the belt."""
         logger.info("Starting belt")
-        await self._write(_build_packet(CMD_MODE, [1]))  # Set manual mode first
+        await self._write(_build_packet(CMD_MODE, [1]))
         await asyncio.sleep(0.3)
         await self._write(_build_packet(CMD_BELT, [BELT_START]))
 
     async def stop(self) -> None:
-        """Stop the belt."""
         logger.info("Stopping belt")
         await self._write(_build_packet(CMD_BELT, [BELT_STOP]))
 
     async def set_speed(self, kmh: float) -> None:
-        """Set belt speed in km/h (0.5-6.0)."""
         speed_val = max(5, min(60, int(kmh * 10)))
         logger.info("Setting speed to %.1f km/h (raw=%d)", kmh, speed_val)
         await self._write(_build_packet(CMD_SPEED, [speed_val]))
 
 
 async def scan_for_walkingpads(timeout: float = 10.0) -> list[dict]:
-    """Scan for WalkingPad BLE devices."""
     logger.info("Scanning for WalkingPad devices (%ds)...", int(timeout))
     devices = await BleakScanner.discover(timeout=timeout)
     results = []
