@@ -33,8 +33,9 @@ class WalkingPadApp:
         self.root = tk.Tk()
         self.root.title("WalkingPad Control")
         self.root.configure(bg=BG)
-        self.root.resizable(False, False)
-        self.root.geometry("420x700")
+        self.root.resizable(True, True)
+        self.root.minsize(460, 780)
+        self.root.geometry("460x780")
 
         # State
         self.controller: WalkingPadController | None = None
@@ -65,12 +66,12 @@ class WalkingPadApp:
     # --- UI Construction ---
 
     def _build_ui(self):
-        pad = {"padx": 12, "pady": 4}
+        pad = {"padx": 14, "pady": 6}
         self.root.grid_columnconfigure(0, weight=1)
 
         # Header
         hdr = tk.Frame(self.root, bg=BG)
-        hdr.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 4))
+        hdr.grid(row=0, column=0, sticky="ew", padx=14, pady=(14, 6))
         tk.Label(hdr, text="WalkingPad Control", font=("sans-serif", 16, "bold"),
                  bg=BG, fg=FG).pack(side="left")
         self.conn_label = tk.Label(hdr, text="Nicht verbunden", font=("sans-serif", 9),
@@ -131,7 +132,7 @@ class WalkingPadApp:
                                       variable=self.speed_var, showvalue=False,
                                       bg=BG_CARD, fg=CYAN, troughcolor=BG_INPUT,
                                       activebackground=CYAN, highlightthickness=0,
-                                      bd=0, length=350, sliderlength=20,
+                                      bd=0, sliderlength=20,
                                       command=self._on_slider)
         self.speed_slider.grid(row=1, column=0, padx=12, sticky="ew")
 
@@ -152,19 +153,19 @@ class WalkingPadApp:
 
         self.start_btn = tk.Button(actions, text="▶  Start", command=self._on_start,
                                     bg="#1a3a2a", fg=GREEN, activebackground=GREEN,
-                                    activeforeground=BG, bd=0, pady=10,
-                                    font=("sans-serif", 11, "bold"), state="disabled")
-        self.start_btn.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+                                    activeforeground=BG, bd=0, pady=12,
+                                    font=("sans-serif", 12, "bold"), state="disabled")
+        self.start_btn.grid(row=0, column=0, sticky="ew", padx=(0, 5))
 
         self.stop_btn = tk.Button(actions, text="■  Stop", command=self._on_stop,
                                    bg="#3a1a1a", fg=RED, activebackground=RED,
-                                   activeforeground=BG, bd=0, pady=10,
-                                   font=("sans-serif", 11, "bold"), state="disabled")
-        self.stop_btn.grid(row=0, column=1, sticky="ew", padx=(4, 0))
+                                   activeforeground=BG, bd=0, pady=12,
+                                   font=("sans-serif", 12, "bold"), state="disabled")
+        self.stop_btn.grid(row=0, column=1, sticky="ew", padx=(5, 0))
 
         # Server info
         info = tk.Frame(self.root, bg=BG)
-        info.grid(row=5, column=0, sticky="ew", padx=12, pady=(8, 0))
+        info.grid(row=5, column=0, sticky="ew", padx=14, pady=(10, 0))
         self.server_label = tk.Label(info, text="Server: nicht gestartet",
                                       font=("monospace", 8), bg=BG, fg=FG_DIM, anchor="w")
         self.server_label.pack(fill="x")
@@ -176,10 +177,10 @@ class WalkingPadApp:
         log_frame = tk.LabelFrame(self.root, text="Log", font=("sans-serif", 9),
                                    bg=BG_CARD, fg=FG_DIM, bd=1, relief="solid",
                                    highlightbackground=BORDER, highlightthickness=1)
-        log_frame.grid(row=6, column=0, sticky="nsew", padx=12, pady=(8, 12))
+        log_frame.grid(row=6, column=0, sticky="nsew", padx=14, pady=(10, 14))
         self.root.grid_rowconfigure(6, weight=1)
 
-        self.log_text = tk.Text(log_frame, height=6, bg=BG_CARD, fg=FG_DIM,
+        self.log_text = tk.Text(log_frame, height=8, bg=BG_CARD, fg=FG_DIM,
                                  font=("monospace", 9), bd=0, wrap="word",
                                  state="disabled", highlightthickness=0)
         self.log_text.pack(fill="both", expand=True, padx=4, pady=4)
@@ -189,12 +190,12 @@ class WalkingPadApp:
 
     def _make_stat(self, parent, key, label, default, color, row, col, colspan=1):
         frame = tk.Frame(parent, bg=BG_CARD, highlightbackground=BORDER,
-                         highlightthickness=1, padx=12, pady=8)
-        frame.grid(row=row, column=col, columnspan=colspan, sticky="ew", padx=3, pady=3)
-        val = tk.Label(frame, text=default, font=("monospace", 20, "bold"),
+                         highlightthickness=1, padx=14, pady=10)
+        frame.grid(row=row, column=col, columnspan=colspan, sticky="nsew", padx=4, pady=4)
+        val = tk.Label(frame, text=default, font=("monospace", 22, "bold"),
                        bg=BG_CARD, fg=color)
-        val.pack()
-        tk.Label(frame, text=label, font=("sans-serif", 8), bg=BG_CARD, fg=FG_DIM).pack()
+        val.pack(pady=(2, 0))
+        tk.Label(frame, text=label, font=("sans-serif", 9), bg=BG_CARD, fg=FG_DIM).pack()
         self.stat_labels[key] = val
 
     # --- Logging ---
