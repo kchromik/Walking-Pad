@@ -163,11 +163,24 @@ class WalkingPadController:
                 self._client = BleakClient(device, disconnected_callback=self._on_disconnect)
                 await self._client.connect(timeout=15.0)
 
+                # Ensure GATT service discovery is complete (required on Python 3.14 / BlueZ)
+                svcs = self._client.services
+                if not svcs or not svcs.characteristics:
+                    await asyncio.sleep(1)
+                    svcs = self._client.services
+
                 # Subscribe to notifications (bonus — may not fire on all devices)
                 try:
                     await self._client.start_notify(READ_UUID, self._on_notify)
                 except Exception:
                     pass  # Not critical — we poll via direct reads
+
+                # Verify we can actually communicate with the device
+                try:
+                    await self._client.read_gatt_char(READ_UUID)
+                except Exception:
+                    await asyncio.sleep(0.5)
+                    await self._client.read_gatt_char(READ_UUID)
 
                 self._ready = True
                 self.stats.connected = True
